@@ -1,0 +1,27 @@
+# 1. Determinarea preciziei mașină u
+u = 1.0
+while (1.0 + u) != 1.0:
+    u /= 10
+
+# Revenim la ultima valoare nenulă a lui u
+u *= 10
+print("Precizia mașină u:", u)
+
+# 2. Verificarea neasociativității adunării
+x = 1.0
+y = u / 10
+z = u / 10
+
+# Calculăm expresiile pentru testul de neasociativitate
+left_side = (x + y) + z
+right_side = x + (y + z)
+
+# Afișăm rezultatele
+print("(x + y) + z =", left_side)
+print("x + (y + z) =", right_side)
+
+# Verificăm dacă sunt diferite
+if left_side != right_side:
+    print("Adunarea este neasociativă!")
+else:
+    print("Adunarea este asociativă.")
