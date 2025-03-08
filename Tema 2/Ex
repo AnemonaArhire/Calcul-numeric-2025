@@ -1,0 +1,75 @@
+import numpy as np
+from scipy.linalg import solve, inv
+
+
+def lu_decomposition(A, dU, epsilon):
+    """
+    Realizează descompunerea LU a matricei A, unde diagonala lui U este dată de dU.
+    """
+    n = A.shape[0]
+    for p in range(n):
+        if abs(dU[p]) < epsilon:
+            raise ValueError("Diagonala lui U conține un element prea mic, descompunerea nu este posibilă.")
+
+        for i in range(p + 1, n):
+            A[i, p] /= A[p, p]
+
+        for i in range(p + 1, n):
+            for j in range(p + 1, n):
+                A[i, j] -= A[i, p] * A[p, j]
+    return A
+
+
+def forward_substitution(L, b):
+    """Rezolvă sistemul Ly = b prin substituție directă."""
+    n = len(b)
+    y = np.zeros(n)
+    for i in range(n):
+        y[i] = b[i] - np.dot(L[i, :i], y[:i])
+    return y
+
+
+def backward_substitution(U, y, dU):
+    """Rezolvă sistemul Ux = y prin substituție inversă, ținând cont de diagonala U."""
+    n = len(y)
+    x = np.zeros(n)
+    for i in range(n - 1, -1, -1):
+        x[i] = (y[i] - np.dot(U[i, i + 1:], x[i + 1:])) / dU[i]
+    return x
+
+
+def determinant_from_lu(L, dU):
+    """Calculează determinantul folosind det(A) = det(L) * det(U)."""
+    det_L = np.prod(np.diag(L))  # Det(L) = 1 deoarece L are diagonală unitate
+    det_U = np.prod(dU)
+    return det_L * det_U
+
+
+def solve_system(A, b, dU, epsilon):
+    """Calculează soluția sistemului Ax = b folosind descompunerea LU."""
+    Ainit = A.copy()
+    A = lu_decomposition(A, dU, epsilon)
+    y = forward_substitution(A, b)
+    x_LU = backward_substitution(A, y, dU)
+    norm_error = np.linalg.norm(Ainit @ x_LU - b, 2)
+    return x_LU, norm_error
+
+
+# Exemplu de utilizare
+n = 5
+epsilon = 1e-9
+A = np.random.rand(n, n)
+b = np.random.rand(n)
+dU = np.random.rand(n) + epsilon  # Se asigură că diagonala este nenulă
+
+x_LU, error = solve_system(A, b, dU, epsilon)
+print("Soluția xLU:", x_LU)
+print("Norma erorii:", error)
+
+# Comparare cu metoda directă
+x_lib = solve(A, b)
+inverse_A = inv(A)
+error_x_lib = np.linalg.norm(x_LU - x_lib, 2)
+error_inverse = np.linalg.norm(x_LU - inverse_A @ b, 2)
+print("||xLU - xlib||2:", error_x_lib)
+print("||xLU - A^(-1)b||2:", error_inverse)
