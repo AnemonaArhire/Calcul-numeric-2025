@@ -1,0 +1,80 @@
+import numpy as np
+from collections import defaultdict
+
+
+def read_sparse_matrix(file_path):
+    with open(file_path, 'r') as f:
+        lines = f.readlines()
+
+    n = int(lines[0].strip())
+    matrix = defaultdict(dict)
+
+    for line in lines[1:]:
+        val, i, j = map(float, line.split())
+        i, j = int(i), int(j)
+        matrix[i][j] = val
+
+    return n, matrix
+
+
+def read_vector(file_path):
+    with open(file_path, 'r') as f:
+        lines = f.readlines()
+
+    n = int(lines[0].strip())
+    vector = np.zeros(n)
+
+    for i, line in enumerate(lines[1:]):
+        vector[i] = float(line.strip())
+
+    return n, vector
+
+
+def check_diagonal(matrix, n):
+    for i in range(n):
+        if i not in matrix or i not in matrix[i]:
+            raise ValueError(f"Elementul de pe diagonală A[{i},{i}] este zero sau lipsă!")
+
+
+def gauss_seidel(matrix, b, tol=1e-10, max_iter=10000):
+    n = len(b)
+    x = np.zeros(n)
+    for _ in range(max_iter):
+        x_new = np.copy(x)
+        for i in range(n):
+            if i in matrix:
+                sum_ax = sum(matrix[i][j] * x[j] for j in matrix[i] if j != i)
+                x_new[i] = (b[i] - sum_ax) / matrix[i][i]
+        if np.linalg.norm(x_new - x, ord=np.inf) < tol:
+            break
+        x = x_new
+    return x
+
+
+def compute_error(matrix, x, b):
+    n = len(b)
+    Ax = np.zeros(n)
+    for i in range(n):
+        if i in matrix:
+            Ax[i] = sum(matrix[i][j] * x[j] for j in matrix[i])
+    return np.linalg.norm(Ax - b, ord=np.inf)
+
+
+def add_sparse_matrices(matrix_a, matrix_b, epsilon=1e-10):
+    result = defaultdict(dict)
+    for i in set(matrix_a.keys()).union(matrix_b.keys()):
+        for j in set(matrix_a.get(i, {}).keys()).union(matrix_b.get(i, {})):
+            val = matrix_a.get(i, {}).get(j, 0) + matrix_b.get(i, {}).get(j, 0)
+            if abs(val) > epsilon:
+                result[i][j] = val
+    return result
+
+
+# Exemplu de utilizare:
+n, A = read_sparse_matrix("a_1.txt")
+n, b = read_vector("b_1.txt")
+check_diagonal(A, n)
+x_gs = gauss_seidel(A, b)
+error = compute_error(A, x_gs, b)
+print("Soluția obținută:", x_gs)
+print("Eroarea:", error)
