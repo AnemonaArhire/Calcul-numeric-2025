@@ -22,11 +22,11 @@ def lu_decomposition_optimized(A, dU, epsilon):
         if abs(A[p, p]) < epsilon:
             raise ValueError("Pivot prea mic, descompunerea nu este posibilă.")
 
-        factor = A[p, p] / dU[p]
+        dU[p] = A[p, p]
         U_storage[index_upper(p, p, n)] = dU[p]
 
         for j in range(p + 1, n):
-            U_storage[index_upper(p, j, n)] = A[p, j] / factor
+            U_storage[index_upper(p, j, n)] = A[p, j] / dU[p]
 
         for i in range(p + 1, n):
             L_storage[index_lower(i, p)] = A[i, p] / A[p, p]
@@ -64,7 +64,6 @@ def backward_substitution_optimized(U_storage, y, dU, n):
 
 def reconstruct_LU(L_storage, U_storage, dU, n):
     LU = np.zeros((n, n))
-
     for i in range(n):
         LU[i, i] = dU[i]
         for j in range(i):
@@ -77,27 +76,25 @@ def reconstruct_LU(L_storage, U_storage, dU, n):
     return LU
 
 
-def solve_system_optimized(A, b, dU, epsilon):
+def solve_system_optimized(A, b, epsilon):
     n = A.shape[0]
-    L_storage, U_storage = lu_decomposition_optimized(A, dU, epsilon)
+    dU = np.zeros(n)
+    L_storage, U_storage = lu_decomposition_optimized(A.copy(), dU, epsilon)
     y = forward_substitution_optimized(L_storage, b, n)
     x_LU = backward_substitution_optimized(U_storage, y, dU, n)
-
     LU_reconstructed = reconstruct_LU(L_storage, U_storage, dU, n)
     norm_LU_A = np.linalg.norm(A - LU_reconstructed, 2)
-
     return x_LU, norm_LU_A
 
 
 # Setări pentru testare
-n = 5  # Folosim un n mic pentru afișare clară, pentru n mare se poate ascunde output-ul detaliat
+n = 5  # Dimensiunea matricei
 epsilon = 1e-9
 A = np.random.rand(n, n)
 b = np.random.rand(n)
-dU = np.random.rand(n) + epsilon
 
 # Calculul sistemului folosind LU optimizat
-x_LU, error_LU_A = solve_system_optimized(A, b, dU, epsilon)
+x_LU, error_LU_A = solve_system_optimized(A, b, epsilon)
 
 # Comparare cu metoda directă
 x_lib = solve(A, b)
