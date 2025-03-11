@@ -2,74 +2,103 @@ import numpy as np
 from scipy.linalg import solve, inv
 
 
-def lu_decomposition(A, dU, epsilon):
+def index_lower(i, j):
+    """Returnează indexul pentru elementele L din vectorul comprimat."""
+    return i * (i + 1) // 2 + j
+
+
+def index_upper(i, j, n):
+    """Returnează indexul pentru elementele U din vectorul comprimat."""
+    return i * n + j - (i * (i + 1)) // 2
+
+
+def lu_decomposition_optimized(A, dU, epsilon):
     """
-    Realizează descompunerea LU a matricei A, unde diagonala lui U este dată de dU.
+    Calculează descompunerea LU fără a modifica A.
+    L și U sunt stocate în vectori comprimați.
     """
     n = A.shape[0]
+    L_storage = np.zeros(n * (n + 1) // 2)
+    U_storage = np.zeros(n * (n + 1) // 2)
+
     for p in range(n):
-        if abs(dU[p]) < epsilon:
-            raise ValueError("Diagonala lui U conține un element prea mic, descompunerea nu este posibilă.")
+        if abs(A[p, p]) < epsilon:
+            raise ValueError("Pivot prea mic, descompunerea nu este posibilă.")
+
+        factor = A[p, p] / dU[p]  # Ajustare pivot
+        U_storage[index_upper(p, p, n)] = dU[p]  # Setare diagonală U
+
+        for j in range(p + 1, n):
+            U_storage[index_upper(p, j, n)] = A[p, j] / factor  # Calcul U
 
         for i in range(p + 1, n):
-            A[i, p] /= A[p, p]
-
-        for i in range(p + 1, n):
+            L_storage[index_lower(i, p)] = A[i, p] / A[p, p]  # Calcul L
             for j in range(p + 1, n):
-                A[i, j] -= A[i, p] * A[p, j]
-    return A
+                A[i, j] -= L_storage[index_lower(i, p)] * U_storage[index_upper(p, j, n)]
+
+    return L_storage, U_storage
 
 
-def forward_substitution(L, b):
-    """Rezolvă sistemul Ly = b prin substituție directă."""
-    n = len(b)
+def forward_substitution_optimized(L_storage, b, n):
+    """Rezolvă Ly = b cu L stocat într-un vector comprimat."""
     y = np.zeros(n)
     for i in range(n):
-        y[i] = b[i] - np.dot(L[i, :i], y[:i])
+        sum_Ly = sum(L_storage[index_lower(i, j)] * y[j] for j in range(i))
+        y[i] = b[i] - sum_Ly
     return y
 
 
-def backward_substitution(U, y, dU):
-    """Rezolvă sistemul Ux = y prin substituție inversă, ținând cont de diagonala U."""
-    n = len(y)
+def backward_substitution_optimized(U_storage, y, dU, n):
+    """Rezolvă Ux = y cu U stocat într-un vector comprimat și diagonală dU."""
     x = np.zeros(n)
     for i in range(n - 1, -1, -1):
-        x[i] = (y[i] - np.dot(U[i, i + 1:], x[i + 1:])) / dU[i]
+        sum_Ux = sum(U_storage[index_upper(i, j, n)] * x[j] for j in range(i + 1, n))
+        x[i] = (y[i] - sum_Ux) / dU[i]
     return x
 
 
-def determinant_from_lu(L, dU):
-    """Calculează determinantul folosind det(A) = det(L) * det(U)."""
-    det_L = np.prod(np.diag(L))  # Det(L) = 1 deoarece L are diagonală unitate
-    det_U = np.prod(dU)
-    return det_L * det_U
+def reconstruct_LU(L_storage, U_storage, dU, n):
+    """Reconstruiește matricea LU pentru verificare."""
+    LU = np.zeros((n, n))
+    for i in range(n):
+        LU[i, i] = dU[i]
+        for j in range(i):
+            LU[i, j] = L_storage[index_lower(i, j)]
+        for j in range(i + 1, n):
+            LU[i, j] = U_storage[index_upper(i, j, n)]
+    return LU
 
 
-def solve_system(A, b, dU, epsilon):
-    """Calculează soluția sistemului Ax = b folosind descompunerea LU."""
-    Ainit = A.copy()
-    A = lu_decomposition(A, dU, epsilon)
-    y = forward_substitution(A, b)
-    x_LU = backward_substitution(A, y, dU)
-    norm_error = np.linalg.norm(Ainit @ x_LU - b, 2)
-    return x_LU, norm_error
+def solve_system_optimized(A, b, dU, epsilon):
+    """Rezolvă sistemul Ax = b folosind reprezentarea optimizată LU."""
+    n = A.shape[0]
+    L_storage, U_storage = lu_decomposition_optimized(A, dU, epsilon)
+    y = forward_substitution_optimized(L_storage, b, n)
+    x_LU = backward_substitution_optimized(U_storage, y, dU, n)
+
+    LU_reconstructed = reconstruct_LU(L_storage, U_storage, dU, n)
+    norm_LU_A = np.linalg.norm(A - LU_reconstructed, 2)  # Verificare A ≈ LU
+
+    return x_LU, norm_LU_A
 
 
-# Exemplu de utilizare
-n = 5
+# Date de intrare pentru testare
+n = 100  # Testăm pentru n mare
 epsilon = 1e-9
 A = np.random.rand(n, n)
 b = np.random.rand(n)
-dU = np.random.rand(n) + epsilon  # Se asigură că diagonala este nenulă
+dU = np.random.rand(n) + epsilon  # Asigurăm că diagonala este nenulă
 
-x_LU, error = solve_system(A, b, dU, epsilon)
-print("Soluția xLU:", x_LU)
-print("Norma erorii:", error)
+# Calculăm soluția folosind reprezentarea optimizată LU
+x_LU, error_LU_A = solve_system_optimized(A, b, dU, epsilon)
 
 # Comparare cu metoda directă
 x_lib = solve(A, b)
 inverse_A = inv(A)
 error_x_lib = np.linalg.norm(x_LU - x_lib, 2)
 error_inverse = np.linalg.norm(x_LU - inverse_A @ b, 2)
+
+# Afișare rezultate
+print("Norma ||A - LU||2:", error_LU_A)
 print("||xLU - xlib||2:", error_x_lib)
 print("||xLU - A^(-1)b||2:", error_inverse)
