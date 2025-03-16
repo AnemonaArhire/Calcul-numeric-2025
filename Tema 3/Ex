@@ -1,80 +1,199 @@
 import numpy as np
-from collections import defaultdict
+from scipy.sparse import lil_matrix, csr_matrix
+from scipy.sparse.linalg import norm
+from scipy.linalg import solve
+
+# 🔹 1. Citirea matricei rare
+def citire_matrice_rara(nume_fisier):
+    try:
+        with open(nume_fisier, 'r') as f:
+            n = int(f.readline().strip())
+            A = lil_matrix((n, n))
+            for line in f:
+                valori = line.strip().replace(',', ' ').split()
+                if len(valori) != 3:
+                    print(f"⚠️ Linie invalidă (ignorat): {line}")
+                    continue
+                i, j, val = int(float(valori[0])), int(float(valori[1])), float(valori[2])
+                A[i - 1, j - 1] += val  # In case of duplicate indices, sum the values
+        return A.tocsr()
+    except FileNotFoundError:
+        print(f"❌ Eroare: Fișierul {nume_fisier} nu a fost găsit!")
+        exit(1)
+    except ValueError as e:
+        print(f"❌ Eroare la citirea fișierului {nume_fisier}: {e}")
+        exit(1)
 
 
-def read_sparse_matrix(file_path):
-    with open(file_path, 'r') as f:
-        lines = f.readlines()
-
-    n = int(lines[0].strip())
-    matrix = defaultdict(dict)
-
-    for line in lines[1:]:
-        val, i, j = map(float, line.split())
-        i, j = int(i), int(j)
-        matrix[i][j] = val
-
-    return n, matrix
-
-
-def read_vector(file_path):
-    with open(file_path, 'r') as f:
-        lines = f.readlines()
-
-    n = int(lines[0].strip())
-    vector = np.zeros(n)
-
-    for i, line in enumerate(lines[1:]):
-        vector[i] = float(line.strip())
-
-    return n, vector
+# 🔹 2. Citirea vectorului b
+def citire_vector_b(nume_fisier):
+    try:
+        with open(nume_fisier, 'r') as f:
+            n = int(f.readline().strip())
+            b = np.zeros(n)
+            for i, line in enumerate(f):
+                if line.strip():
+                    b[i] = float(line.strip())
+        return b
+    except FileNotFoundError:
+        print(f"❌ Eroare: Fișierul {nume_fisier} nu a fost găsit!")
+        exit(1)
+    except ValueError as e:
+        print(f"❌ Eroare la citirea fișierului {nume_fisier}: {e}")
+        exit(1)
 
 
-def check_diagonal(matrix, n):
+# 🔹 3. Generare matrice rară pe linii
+def generare_matrice_rara_linii(A):
+    n = A.shape[0]
+    valori = []
+    ind_col = []
+    inceput_linii = [0] * (n + 1)
+
     for i in range(n):
-        if i not in matrix or i not in matrix[i]:
-            raise ValueError(f"Elementul de pe diagonală A[{i},{i}] este zero sau lipsă!")
+        non_zero_cols = A[i].nonzero()[1]
+        inceput_linii[i + 1] = inceput_linii[i] + len(non_zero_cols)
+        for col in non_zero_cols:
+            valori.append(A[i, col])
+            ind_col.append(col)
+
+    inceput_linii[-1] = len(valori)
+    return np.array(valori), np.array(ind_col), np.array(inceput_linii)
 
 
-def gauss_seidel(matrix, b, tol=1e-10, max_iter=10000):
-    n = len(b)
+# 🔹 4. Generare matrice rară pe diagonale
+def generare_matrice_rara_diagonale(A):
+    n = A.shape[0]
+    diagonale = []
+    diag_no = []
+
+    for i in range(n):
+        for j in range(i, n):
+            if A[i, j] != 0:
+                diag_no.append(j - i)
+                diagonale.append(A[i, j])
+
+    return np.array(diagonale), np.array(diag_no)
+
+
+# 🔹 5. Verificarea și eliminarea rândurilor și coloanelor cu zerouri pe diagonală
+def verifica_si_elimina_nule(A, b):
+    mask = A.diagonal() != 0
+    A_filtrata = A[mask][:, mask]  # Eliminăm atât rândurile, cât și coloanele
+    b_filtrat = b[mask]
+    eliminari = len(b) - len(b_filtrat)
+    print(f"\n✅ Eliminat {eliminari} rânduri și coloane cu zerouri pe diagonală.")
+    return A_filtrata, b_filtrat
+
+
+# 🔹 6. Completarea diagonalei pentru evitarea împărțirii la zero
+def completeaza_diagonala(A, epsilon=1e-10):
+    for i in range(A.shape[0]):
+        if A[i, i] == 0:
+            A[i, i] = epsilon
+            print(f"🔄 Adăugat {epsilon} la A[{i}, {i}] pentru a evita împărțirea la zero.")
+    return A
+
+
+# 🔹 7. Metoda Gauss-Seidel cu prevenirea overflow-ului și stabilizare numerică
+def gauss_seidel(A, b, tol=1e-10, max_iter=10000):
+    n = A.shape[0]
     x = np.zeros(n)
-    for _ in range(max_iter):
+    max_value = 1e10  # Prag maxim pentru stabilizare numerică
+
+    for k in range(max_iter):
         x_new = np.copy(x)
         for i in range(n):
-            if i in matrix:
-                sum_ax = sum(matrix[i][j] * x[j] for j in matrix[i] if j != i)
-                x_new[i] = (b[i] - sum_ax) / matrix[i][i]
+            suma = 0
+            for j in range(n):
+                if j != i:
+                    try:
+                        product = A[i, j] * x_new[j]
+                        if np.abs(product) > max_value:  # Limităm produsul pentru a preveni overflow
+                            product = np.sign(product) * max_value
+                        suma += product
+                    except OverflowError:
+                        raise ValueError(f"❌ Overflow detectat la iteratia {k}, element A[{i}, {j}]!")
+
+            if np.isinf(suma) or np.isnan(suma):
+                raise ValueError(f"❌ Eroare numerică la iteratia {k}: overflow sau NaN detectat!")
+
+            x_new[i] = (b[i] - suma) / A[i, i]
+
         if np.linalg.norm(x_new - x, ord=np.inf) < tol:
-            break
+            return x_new, k + 1
         x = x_new
-    return x
+
+    return x, max_iter
 
 
-def compute_error(matrix, x, b):
-    n = len(b)
-    Ax = np.zeros(n)
-    for i in range(n):
-        if i in matrix:
-            Ax[i] = sum(matrix[i][j] * x[j] for j in matrix[i])
-    return np.linalg.norm(Ax - b, ord=np.inf)
+# 🔹 8. Calculul normei Ax - b
+def calculeaza_norma(A, x, b):
+    residual = A.dot(x) - b
+    return np.linalg.norm(residual, np.inf)
 
 
-def add_sparse_matrices(matrix_a, matrix_b, epsilon=1e-10):
-    result = defaultdict(dict)
-    for i in set(matrix_a.keys()).union(matrix_b.keys()):
-        for j in set(matrix_a.get(i, {}).keys()).union(matrix_b.get(i, {})):
-            val = matrix_a.get(i, {}).get(j, 0) + matrix_b.get(i, {}).get(j, 0)
-            if abs(val) > epsilon:
-                result[i][j] = val
-    return result
+# 🔹 9. Afișarea matricei într-un format lizibil
+def afiseaza_matrice_formatata(A):
+    np.set_printoptions(precision=7, suppress=True, linewidth=100, threshold=10_000)
+    print("\nMatricea A după completarea diagonalei:")
+    print(A.toarray())
 
 
-# Exemplu de utilizare:
-n, A = read_sparse_matrix("a_1.txt")
-n, b = read_vector("b_1.txt")
-check_diagonal(A, n)
-x_gs = gauss_seidel(A, b)
-error = compute_error(A, x_gs, b)
-print("Soluția obținută:", x_gs)
-print("Eroarea:", error)
+# 🔹 10. Suma a două matrici rare
+def suma_matrici_rari(A, B):
+    C = A + B
+    return C
+
+
+# 🔹 11. Soluționare cu metoda de eliminare Gaussiană (fallback în caz de eroare)
+def rezolva_gaussiana(A, b):
+    try:
+        x = solve(A.toarray(), b)
+        return x
+    except Exception as e:
+        print(f"❌ Eroare la rezolvarea sistemului cu eliminare Gaussiana: {e}")
+        return None
+
+
+# 🔹 12. MAIN - Program principal
+if __name__ == "__main__":
+    nume_fisier_A = "a_1.txt"
+    nume_fisier_B = "b_1.txt"
+
+    # Citire matrice rară și vector
+    A = citire_matrice_rara(nume_fisier_A)
+    b = citire_vector_b(nume_fisier_B)
+
+    # Verificare și eliminare rânduri/coloane cu zerouri pe diagonală
+    A, b = verifica_si_elimina_nule(A, b)
+
+    # Completare diagonală
+    A = completeaza_diagonala(A)
+    afiseaza_matrice_formatata(A)
+
+    # Generare matrice rară pe linii
+    valori, ind_col, inceput_linii = generare_matrice_rara_linii(A)
+    print("\nMatricea rară generată pe linii:")
+    print(f"Valori: {valori}")
+    print(f"Indici coloană: {ind_col}")
+    print(f"Început linii: {inceput_linii}")
+
+    # Generare matrice rară pe diagonale
+    diagonale, diag_no = generare_matrice_rara_diagonale(A)
+    print("\nMatricea rară generată pe diagonale:")
+    print(f"Diagonale: {diagonale}")
+    print(f"Număr diagonale: {diag_no}")
+
+    # Aplicație metoda Gauss-Seidel
+    try:
+        x_GS, iteratii = gauss_seidel(A, b)
+        print(f"\n✅ Soluția aproximativă x_GS: {x_GS}")
+        print(f"🔄 Număr de iterații: {iteratii}")
+        print(f"🔄 Norma ||Ax - b||∞: {calculeaza_norma(A, x_GS, b)}")
+    except ValueError as e:
+        print(f"\n❌ Eroare Gauss-Seidel: {e}")
+        print("➡️ Încercăm eliminarea Gaussiana...")
+        x_LU = rezolva_gaussiana(A, b)
+        if x_LU is not None:
+            print(f"\n✅ Soluția folosind eliminarea Gaussiana: {x_LU}")
