@@ -3,19 +3,26 @@ from scipy.sparse import lil_matrix, csr_matrix
 from scipy.sparse.linalg import norm
 from scipy.linalg import solve
 
-# 🔹 1. Citirea matricei rare
+
+# 🔹 Citirea matricei rare din fișier
 def citire_matrice_rara(nume_fisier):
     try:
         with open(nume_fisier, 'r') as f:
-            n = int(f.readline().strip())
+            n = int(f.readline().strip())  # Dimensiunea matricei
             A = lil_matrix((n, n))
             for line in f:
                 valori = line.strip().replace(',', ' ').split()
                 if len(valori) != 3:
                     print(f"⚠️ Linie invalidă (ignorat): {line}")
                     continue
-                i, j, val = int(float(valori[0])), int(float(valori[1])), float(valori[2])
-                A[i - 1, j - 1] += val  # In case of duplicate indices, sum the values
+                try:
+                    i, j, val = int(float(valori[0])), int(float(valori[1])), float(valori[2])
+                    i -= 1  # Ajustăm indexul de la 1 la 0
+                    j -= 1  # Ajustăm indexul de la 1 la 0
+                    A[i, j] += val  # În cazul în care indicii se repetă, se adună valorile
+                except ValueError as e:
+                    print(f"❌ Eroare la procesarea liniei: {line} - {e}")
+                    continue
         return A.tocsr()
     except FileNotFoundError:
         print(f"❌ Eroare: Fișierul {nume_fisier} nu a fost găsit!")
@@ -23,7 +30,6 @@ def citire_matrice_rara(nume_fisier):
     except ValueError as e:
         print(f"❌ Eroare la citirea fișierului {nume_fisier}: {e}")
         exit(1)
-
 
 # 🔹 2. Citirea vectorului b
 def citire_vector_b(nume_fisier):
@@ -140,21 +146,32 @@ def afiseaza_matrice_formatata(A):
     print(A.toarray())
 
 
-# 🔹 10. Suma a două matrici rare
+# 🔹 Funcția pentru suma a două matrici rare
 def suma_matrici_rari(A, B):
-    C = A + B
-    return C
+    return A + B
 
 
-# 🔹 11. Soluționare cu metoda de eliminare Gaussiană (fallback în caz de eroare)
-def rezolva_gaussiana(A, b):
-    try:
-        x = solve(A.toarray(), b)
-        return x
-    except Exception as e:
-        print(f"❌ Eroare la rezolvarea sistemului cu eliminare Gaussiana: {e}")
-        return None
+# 🔹 Verificarea că suma matricilor corespunde cu matricea de referință
+def verifica_suma_matrici(A, B, C, epsilon=1e-10):
+    # C este matricea de referință (aplusb.txt)
+    A_plus_B = suma_matrici_rari(A, B)
 
+    # Comparăm elementele matricelor A+B și C
+    for i in range(A.shape[0]):
+        for j in range(A.shape[1]):
+            val_A_B = A_plus_B[i, j]
+            val_C = C[i, j]
+
+            # Dacă valoarea este aproape de zero, putem ignora diferențele foarte mici
+            if np.abs(val_A_B) < epsilon and np.abs(val_C) < epsilon:
+                continue  # Ignorăm elementele apropiate de zero
+
+            # Verificăm diferența pentru elementele nenule
+            if np.abs(val_A_B - val_C) >= epsilon:
+                print(f"❌ Elementul A+B[{i + 1},{j + 1}] = {val_A_B}, dar în C[{i + 1},{j + 1}] = {val_C}")
+                return False
+    print("✅ Suma matricelor corespunde cu matricea de referință!")
+    return True
 
 # 🔹 12. MAIN - Program principal
 if __name__ == "__main__":
@@ -194,6 +211,20 @@ if __name__ == "__main__":
     except ValueError as e:
         print(f"\n❌ Eroare Gauss-Seidel: {e}")
         print("➡️ Încercăm eliminarea Gaussiana...")
-        x_LU = rezolva_gaussiana(A, b)
-        if x_LU is not None:
-            print(f"\n✅ Soluția folosind eliminarea Gaussiana: {x_LU}")
+
+    # BONUS: Suma a două matrici rare
+    print("\n🔔 BONUS - Suma a două matrici rare:")
+    nume_fisier_A = "a.txt"
+    nume_fisier_B = "b.txt"
+    nume_fisier_C = "aplusb.txt"  # Matricea de referință
+
+    # Citirea matricelor rare A și B și a matricii de referință C
+    A = citire_matrice_rara(nume_fisier_A)
+    B = citire_matrice_rara(nume_fisier_B)
+    C = citire_matrice_rara(nume_fisier_C)
+
+    # Verificăm dacă suma matricelor A și B corespunde cu matricea C
+    if verifica_suma_matrici(A, B, C):
+        print("✅ Suma matricelor este corectă!")
+    else:
+        print("❌ Suma matricelor nu corespunde cu matricea de referință.")
