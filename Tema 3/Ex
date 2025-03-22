@@ -1,46 +1,30 @@
 import numpy as np
 from scipy.sparse import lil_matrix, csr_matrix
-from scipy.sparse.linalg import norm
-from scipy.linalg import solve
 
-
-# 🔹 Citirea matricei rare din fișier
-def citire_matrice_rara(nume_fisier):
-    try:
-        with open(nume_fisier, 'r') as f:
-            n = int(f.readline().strip())  # Dimensiunea matricei
-            A = lil_matrix((n, n))
-            for line in f:
-                valori = line.strip().replace(',', ' ').split()
-                if len(valori) != 3:
-                    print(f"⚠️ Linie invalidă (ignorat): {line}")
-                    continue
-                try:
-                    i, j, val = int(float(valori[0])), int(float(valori[1])), float(valori[2])
-                    i -= 1  # Ajustăm indexul de la 1 la 0
-                    j -= 1  # Ajustăm indexul de la 1 la 0
-                    A[i, j] += val  # În cazul în care indicii se repetă, se adună valorile
-                except ValueError as e:
-                    print(f"❌ Eroare la procesarea liniei: {line} - {e}")
-                    continue
-        return A.tocsr()
-    except FileNotFoundError:
-        print(f"❌ Eroare: Fișierul {nume_fisier} nu a fost găsit!")
-        exit(1)
-    except ValueError as e:
-        print(f"❌ Eroare la citirea fișierului {nume_fisier}: {e}")
-        exit(1)
-
-# 🔹 2. Citirea vectorului b
-def citire_vector_b(nume_fisier):
+def citire_fisier(nume_fisier, tip='matrice'):
     try:
         with open(nume_fisier, 'r') as f:
             n = int(f.readline().strip())
-            b = np.zeros(n)
-            for i, line in enumerate(f):
-                if line.strip():
-                    b[i] = float(line.strip())
-        return b
+            if tip == 'matrice':
+                A = lil_matrix((n, n))
+                for line in f:
+                    valori = line.strip().replace(',', ' ').split()
+                    if len(valori) == 3:
+                        try:
+                            val, i, j = float(valori[0]), int(float(valori[1])), int(float(valori[2]))
+                            if 0 <= i < n and 0 <= j < n:
+                                A[i, j] += val
+                            else:
+                                print(f"⚠️ Indici ieșiți din limite: i={i}, j={j} (ignorat)")
+                        except ValueError as e:
+                            print(f"❌ Eroare la procesarea liniei: {line} - {e}")
+                return A.tocsr()
+            elif tip == 'vector':
+                b = np.zeros(n)
+                for i, line in enumerate(f):
+                    if line.strip():
+                        b[i] = float(line.strip())
+                return b
     except FileNotFoundError:
         print(f"❌ Eroare: Fișierul {nume_fisier} nu a fost găsit!")
         exit(1)
@@ -48,8 +32,6 @@ def citire_vector_b(nume_fisier):
         print(f"❌ Eroare la citirea fișierului {nume_fisier}: {e}")
         exit(1)
 
-
-# 🔹 3. Generare matrice rară pe linii
 def generare_matrice_rara_linii(A):
     n = A.shape[0]
     valori = []
@@ -59,72 +41,52 @@ def generare_matrice_rara_linii(A):
     for i in range(n):
         non_zero_cols = A[i].nonzero()[1]
         inceput_linii[i + 1] = inceput_linii[i] + len(non_zero_cols)
-        for col in non_zero_cols:
-            valori.append(A[i, col])
-            ind_col.append(col)
+        valori.extend(A[i, col] for col in non_zero_cols)
+        ind_col.extend(non_zero_cols)
 
     inceput_linii[-1] = len(valori)
     return np.array(valori), np.array(ind_col), np.array(inceput_linii)
 
-
-# 🔹 4. Generare matrice rară pe diagonale
 def generare_matrice_rara_diagonale(A):
     n = A.shape[0]
     diagonale = []
     diag_no = []
 
-    for i in range(n):
-        for j in range(i, n):
-            if A[i, j] != 0:
-                diag_no.append(j - i)
-                diagonale.append(A[i, j])
+    # Folosim `A.tocoo()` pentru a extrage eficient elementele nenule
+    coo = A.tocoo()
+    for i, j, val in zip(coo.row, coo.col, coo.data):
+        if i <= j:  # Ne interesează doar diagonalele principale și cele de deasupra
+            diag_no.append(j - i)
+            diagonale.append(val)
 
     return np.array(diagonale), np.array(diag_no)
 
-
-# 🔹 5. Verificarea și eliminarea rândurilor și coloanelor cu zerouri pe diagonală
 def verifica_si_elimina_nule(A, b):
     mask = A.diagonal() != 0
-    A_filtrata = A[mask][:, mask]  # Eliminăm atât rândurile, cât și coloanele
+    A_filtrata = A[mask][:, mask]
     b_filtrat = b[mask]
     eliminari = len(b) - len(b_filtrat)
     print(f"\n✅ Eliminat {eliminari} rânduri și coloane cu zerouri pe diagonală.")
     return A_filtrata, b_filtrat
 
-
-# 🔹 6. Completarea diagonalei pentru evitarea împărțirii la zero
 def completeaza_diagonala(A, epsilon=1e-10):
-    for i in range(A.shape[0]):
-        if A[i, i] == 0:
-            A[i, i] = epsilon
-            print(f"🔄 Adăugat {epsilon} la A[{i}, {i}] pentru a evita împărțirea la zero.")
+    diagonala = A.diagonal()
+    mask = diagonala == 0
+    if mask.any():
+        A.setdiag(np.where(mask, epsilon, diagonala))
+        print(f"🔄 Adăugat {epsilon} la elementele diagonalei pentru a evita împărțirea la zero.")
     return A
 
-
-# 🔹 7. Metoda Gauss-Seidel cu prevenirea overflow-ului și stabilizare numerică
 def gauss_seidel(A, b, tol=1e-10, max_iter=10000):
     n = A.shape[0]
     x = np.zeros(n)
-    max_value = 1e10  # Prag maxim pentru stabilizare numerică
+    max_value = 1e10
 
     for k in range(max_iter):
         x_new = np.copy(x)
         for i in range(n):
-            suma = 0
-            for j in range(n):
-                if j != i:
-                    try:
-                        product = A[i, j] * x_new[j]
-                        if np.abs(product) > max_value:  # Limităm produsul pentru a preveni overflow
-                            product = np.sign(product) * max_value
-                        suma += product
-                    except OverflowError:
-                        raise ValueError(f"❌ Overflow detectat la iteratia {k}, element A[{i}, {j}]!")
-
-            if np.isinf(suma) or np.isnan(suma):
-                raise ValueError(f"❌ Eroare numerică la iteratia {k}: overflow sau NaN detectat!")
-
-            x_new[i] = (b[i] - suma) / A[i, i]
+            suma = A[i].dot(x_new) - A[i, i].item() * x_new[i]  # Folosim .item() pentru a extrage scalarul
+            x_new[i] = (b[i] - suma) / A[i, i].item()  # Folosim .item() aici
 
         if np.linalg.norm(x_new - x, ord=np.inf) < tol:
             return x_new, k + 1
@@ -132,77 +94,112 @@ def gauss_seidel(A, b, tol=1e-10, max_iter=10000):
 
     return x, max_iter
 
-
-# 🔹 8. Calculul normei Ax - b
 def calculeaza_norma(A, x, b):
     residual = A.dot(x) - b
     return np.linalg.norm(residual, np.inf)
 
-
-# 🔹 9. Afișarea matricei într-un format lizibil
-def afiseaza_matrice_formatata(A):
-    np.set_printoptions(precision=7, suppress=True, linewidth=100, threshold=10_000)
-    print("\nMatricea A după completarea diagonalei:")
-    print(A.toarray())
-
-
-# 🔹 Funcția pentru suma a două matrici rare
 def suma_matrici_rari(A, B):
     return A + B
 
-
-# 🔹 Verificarea că suma matricilor corespunde cu matricea de referință
 def verifica_suma_matrici(A, B, C, epsilon=1e-10):
-    # C este matricea de referință (aplusb.txt)
-    A_plus_B = suma_matrici_rari(A, B)
+    A_plus_B = A + B
+    diff = A_plus_B - C
 
-    # Comparăm elementele matricelor A+B și C
-    for i in range(A.shape[0]):
-        for j in range(A.shape[1]):
-            val_A_B = A_plus_B[i, j]
-            val_C = C[i, j]
+    for i, j in zip(*diff.nonzero()):
+        if abs(diff[i, j]) >= epsilon:
+            print(f"❌ Elementul A+B[{i}, {j}] = {A_plus_B[i, j]}, dar în C[{i}, {j}] = {C[i, j]}")
+            return False
 
-            # Dacă valoarea este aproape de zero, putem ignora diferențele foarte mici
-            if np.abs(val_A_B) < epsilon and np.abs(val_C) < epsilon:
-                continue  # Ignorăm elementele apropiate de zero
-
-            # Verificăm diferența pentru elementele nenule
-            if np.abs(val_A_B - val_C) >= epsilon:
-                print(f"❌ Elementul A+B[{i + 1},{j + 1}] = {val_A_B}, dar în C[{i + 1},{j + 1}] = {val_C}")
-                return False
     print("✅ Suma matricelor corespunde cu matricea de referință!")
     return True
 
-# 🔹 12. MAIN - Program principal
+def suma_matrice_rara_pe_linii(A, B, epsilon=1e-10):
+    valA, colA, startA = generare_matrice_rara_linii(A)
+    valB, colB, startB = generare_matrice_rara_linii(B)
+    n = A.shape[0]
+
+    valC = []
+    colC = []
+    startC = [0] * (n + 1)
+
+    for i in range(n):
+        sum_map = {}
+        for idx in range(startA[i], startA[i+1]):
+            sum_map[colA[idx]] = valA[idx]
+        for idx in range(startB[i], startB[i+1]):
+            sum_map[colB[idx]] = sum_map.get(colB[idx], 0.0) + valB[idx]
+
+        for c_index in sorted(sum_map.keys()):
+            s = sum_map[c_index]
+            if abs(s) >= epsilon:
+                valC.append(s)
+                colC.append(c_index)
+
+        startC[i+1] = len(valC)
+
+    return csr_matrix((valC, colC, startC), shape=(n, n))
+
+def verifica_suma_pe_linii(A, B, C, epsilon=1e-10):
+    A_plus_B = suma_matrice_rara_pe_linii(A, B, epsilon)
+    valAB, colAB, startAB = generare_matrice_rara_linii(A_plus_B)
+    valC, colC, startC = generare_matrice_rara_linii(C)
+
+    n = A.shape[0]
+
+    for i in range(n):
+        mapAB = {colAB[idx]: valAB[idx] for idx in range(startAB[i], startAB[i+1])}
+        mapC_ = {colC[idx]: valC[idx] for idx in range(startC[i], startC[i+1])}
+
+        all_cols = set(mapAB.keys()).union(set(mapC_.keys()))
+        for c_index in all_cols:
+            vAB = mapAB.get(c_index, 0.0)
+            vC  = mapC_.get(c_index, 0.0)
+            if abs(vAB - vC) >= epsilon:
+                print(f"❌ (Pe linii) Rând {i}, col {c_index}: {vAB} vs. {vC}")
+                return False
+
+    print("✅ (Pe linii) Matricea A+B corespunde cu C (verificat prin stocarea rară)!")
+    return True
+
+def verifica_suma_cu_diferenta(A, B, C, epsilon=1e-10, foloseste_linii=False):
+    if foloseste_linii:
+        A_plus_B = suma_matrice_rara_pe_linii(A, B, epsilon)
+    else:
+        A_plus_B = A + B
+
+    D = A_plus_B - C
+    row, col = D.nonzero()
+
+    for r, c in zip(row, col):
+        val_diff = D[r, c]
+        if abs(val_diff) >= epsilon:
+            print(f"❌ Diferență mare la linia {r+1}, col {c+1}: {val_diff}")
+            return False
+
+    print("✅ Diferența (A+B - C) este < epsilon pentru toate elementele nenule. Suma e corectă!")
+    return True
+
 if __name__ == "__main__":
     nume_fisier_A = "a_1.txt"
     nume_fisier_B = "b_1.txt"
 
-    # Citire matrice rară și vector
-    A = citire_matrice_rara(nume_fisier_A)
-    b = citire_vector_b(nume_fisier_B)
+    A = citire_fisier(nume_fisier_A, 'matrice')
+    b = citire_fisier(nume_fisier_B, 'vector')
 
-    # Verificare și eliminare rânduri/coloane cu zerouri pe diagonală
     A, b = verifica_si_elimina_nule(A, b)
-
-    # Completare diagonală
     A = completeaza_diagonala(A)
-    afiseaza_matrice_formatata(A)
 
-    # Generare matrice rară pe linii
     valori, ind_col, inceput_linii = generare_matrice_rara_linii(A)
     print("\nMatricea rară generată pe linii:")
     print(f"Valori: {valori}")
     print(f"Indici coloană: {ind_col}")
     print(f"Început linii: {inceput_linii}")
 
-    # Generare matrice rară pe diagonale
     diagonale, diag_no = generare_matrice_rara_diagonale(A)
     print("\nMatricea rară generată pe diagonale:")
     print(f"Diagonale: {diagonale}")
     print(f"Număr diagonale: {diag_no}")
 
-    # Aplicație metoda Gauss-Seidel
     try:
         x_GS, iteratii = gauss_seidel(A, b)
         print(f"\n✅ Soluția aproximativă x_GS: {x_GS}")
@@ -210,21 +207,38 @@ if __name__ == "__main__":
         print(f"🔄 Norma ||Ax - b||∞: {calculeaza_norma(A, x_GS, b)}")
     except ValueError as e:
         print(f"\n❌ Eroare Gauss-Seidel: {e}")
-        print("➡️ Încercăm eliminarea Gaussiana...")
+        print("➡️ Se poate încerca altă metodă...")
 
-    # BONUS: Suma a două matrici rare
     print("\n🔔 BONUS - Suma a două matrici rare:")
     nume_fisier_A = "a.txt"
     nume_fisier_B = "b.txt"
-    nume_fisier_C = "aplusb.txt"  # Matricea de referință
+    nume_fisier_C = "aplusb.txt"
 
-    # Citirea matricelor rare A și B și a matricii de referință C
-    A = citire_matrice_rara(nume_fisier_A)
-    B = citire_matrice_rara(nume_fisier_B)
-    C = citire_matrice_rara(nume_fisier_C)
+    A_ = citire_fisier(nume_fisier_A, 'matrice')
+    B_ = citire_fisier(nume_fisier_B, 'matrice')
+    C_ = citire_fisier(nume_fisier_C, 'matrice')
 
-    # Verificăm dacă suma matricelor A și B corespunde cu matricea C
-    if verifica_suma_matrici(A, B, C):
-        print("✅ Suma matricelor este corectă!")
+    print("\n[Metoda existentă (sciPy + for i,j)]")
+    if verifica_suma_matrici(A_, B_, C_):
+        print("✅ Suma (CSR) coincide cu matricea de referință (CSR).")
     else:
-        print("❌ Suma matricelor nu corespunde cu matricea de referință.")
+        print("❌ Suma (CSR) nu corespunde!")
+
+    print("\n[Metoda 'pe linii' implementată manual]")
+    if verifica_suma_pe_linii(A_, B_, C_):
+        print("✅ Suma (pe linii) coincide cu C (pe linii).")
+    else:
+        print("❌ Suma (pe linii) nu corespunde!")
+
+    print("\n[Verificare prin diferență D=(A+B)-C]")
+    ok_linii = verifica_suma_cu_diferenta(A_, B_, C_, foloseste_linii=True)
+    if ok_linii:
+        print("✅ Suma (pe linii) confirmată prin D=(A+B)-C.")
+    else:
+        print("❌ Suma (pe linii) a eșuat la verificarea prin diferență!")
+
+    ok_csr = verifica_suma_cu_diferenta(A_, B_, C_, foloseste_linii=False)
+    if ok_csr:
+        print("✅ Suma (CSR) confirmată prin D=(A+B)-C.")
+    else:
+        print("❌ Suma (CSR) a eșuat la verificarea prin diferență!")
