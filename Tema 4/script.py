@@ -20,10 +20,19 @@ def metoda_Schultz(A, V0, epsilon, kmax):
     Vk = V0
     for k in range(kmax):
         Vk1 = Vk @ (2 * np.eye(A.shape[0]) - A @ Vk)
+
+        # Condiția 1: ||V_k - V_{k-1}|| < epsilon
         if np.linalg.norm(Vk1 - Vk, ord=np.inf) < epsilon:
             return Vk1, k + 1
+
+        # Condiția 3: ||V_k - V_{k-1}|| > 10^10 (divergență)
+        if np.linalg.norm(Vk1 - Vk, ord=np.inf) > 1e10:
+            print(f"Divergență detectată la iterația {k + 1}!")
+            return None, k + 1
+
         Vk = Vk1
-    return Vk, kmax
+
+    return Vk, kmax  # Dacă nu s-a atins precizia, returnează ultima aproximare
 
 
 def metoda_Li_Li_2(A, V0, epsilon, kmax):
@@ -31,9 +40,18 @@ def metoda_Li_Li_2(A, V0, epsilon, kmax):
     for k in range(kmax):
         AVk = A @ Vk
         Vk1 = Vk @ (3 * np.eye(A.shape[0]) - AVk @ (3 * np.eye(A.shape[0]) - AVk))
+
+        # Condiția 1: ||V_k - V_{k-1}|| < epsilon
         if np.linalg.norm(Vk1 - Vk, ord=np.inf) < epsilon:
             return Vk1, k + 1
+
+        # Condiția 3: ||V_k - V_{k-1}|| > 10^10 (divergență)
+        if np.linalg.norm(Vk1 - Vk, ord=np.inf) > 1e10:
+            print(f"Divergență detectată la iterația {k + 1}!")
+            return None, k + 1
+
         Vk = Vk1
+
     return Vk, kmax
 
 
@@ -46,18 +64,26 @@ def metoda_Li_Li_3(A, V0, epsilon, kmax):
         term = I - AVk  # (I_n - V_k A)
         Vk1 = (I + (1 / 4) * term @ (3 * I - AVk) @ (3 * I - AVk)) @ Vk  # Formula corectată
 
-        if np.linalg.norm(Vk1 - Vk, ord=np.inf) < epsilon:  # Verificăm convergența
+        # Condiția 1: ||V_k - V_{k-1}|| < epsilon
+        if np.linalg.norm(Vk1 - Vk, ord=np.inf) < epsilon:
             return Vk1, k + 1
 
-        Vk = Vk1  # Actualizăm V_k
+        # Condiția 3: ||V_k - V_{k-1}|| > 10^10 (divergență)
+        if np.linalg.norm(Vk1 - Vk, ord=np.inf) > 1e10:
+            print(f"Divergență detectată la iterația {k + 1}!")
+            return None, k + 1
+
+        Vk = Vk1
 
     return Vk, kmax  # Returnăm ultima aproximare dacă nu s-a atins precizia
 
 
 # calcul norme eroare
 def calcul_norme(A, Vk, A_inv_exact):
-    norma_A_Vk_I = np.linalg.norm(A @ Vk - np.eye(A.shape[0]), ord=np.inf)  # ||A * Vk - I|| - Cat de apropiata este Vk de inversa reala
-    norma_A_inv_exact_A_inv_aprox = np.linalg.norm(Vk - A_inv_exact, ord=np.inf)  # ||A^-1_exact - A^-1_aprox|| - Diferenta dintre aproximare si inversa exacta
+    norma_A_Vk_I = np.linalg.norm(A @ Vk - np.eye(A.shape[0]),
+                                  ord=np.inf)  # ||A * Vk - I|| - Cat de apropiata este Vk de inversa reala
+    norma_A_inv_exact_A_inv_aprox = np.linalg.norm(Vk - A_inv_exact,
+                                                   ord=np.inf)  # ||A^-1_exact - A^-1_aprox|| - Diferenta dintre aproximare si inversa exacta
     return norma_A_Vk_I, norma_A_inv_exact_A_inv_aprox
 
 
