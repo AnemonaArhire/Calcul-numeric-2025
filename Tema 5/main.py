@@ -107,11 +107,24 @@ def solve_least_squares(A, b):
 def compute_error(A, b, x_I):
     return np.linalg.norm(b - A @ x_I)
 
+def is_symmetric(matrix):
+    for (i, j), val in matrix.items():
+        if matrix.get((j, i), None) != val:
+            return False
+    return True
+
+
 # === Exemplu de utilizare ===
 
 # Pentru a citi din fișier:
 file_path = "m_rar_sim"
 A, n = read_sparse_matrix_list_from_file(file_path)
+
+if is_symmetric(A):
+    print("Matricea este simetrică. \n")
+else:
+    print("⚠ Matricea nu este simetrică. \n")
+
 
 # Metoda puterii
 lambda_max, v_max = power_method(A, n)
@@ -120,19 +133,19 @@ print("Vectorul propriu asociat:", v_max)
 
 # Norma
 norma = compute_norm(A, v_max, lambda_max, n)
-print("Norma ∥A * u_max - λ_max * u_max∥:", norma)
+print("\nNorma ∥A * u_max - λ_max * u_max∥:", norma)
 
 # SVD pe o matrice completă aleatoare A_full (ex: p > n)
 A_full = np.random.rand(n, n + 10)
 b = np.random.rand(n)
 
 U, S, Vt, rank, cond_number, A_inv = compute_svd(A_full)
-print("Valorile singulare:", S)
-print("Rangul matricei:", rank)
-print("Numărul de condiționare:", cond_number)
-print("Pseudoinversa A:", A_inv)
+print("\nValorile singulare:", S)
+print("\nRangul matricei:", rank)
+print("\nNumărul de condiționare:", cond_number)
+print("\nPseudoinversa A:", A_inv)
 
 # Soluția sistemului și eroare
 x_I = solve_least_squares(A_full, b)
-print("Soluția x_I:", x_I)
-print("Eroarea:", compute_error(A_full, b, x_I))
+print("\nSoluția x_I:", x_I)
+print("\nEroarea:", compute_error(A_full, b, x_I))
