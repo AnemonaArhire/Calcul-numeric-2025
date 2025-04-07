@@ -2,54 +2,45 @@ import numpy as np
 import random
 
 def generate_sparse_symmetric_matrix(n, density=0.1):
-    """
-    Generează o matrice simetrică, rară, cu valori nenule pozitive, de dimensiune n x n
-    n: dimensiunea matricei
-    density: densitatea valorilor nenule
-    """
-    matrix = {}  # structură de memorie pentru matricea rară
-
+    matrix = [[] for _ in range(n)]
     for i in range(n):
-        for j in range(i, n):  # doar partea superioară și diagonală
-            if random.random() < density:  # alege dacă elementul va fi nenul
-                value = random.uniform(0.1, 10)  # valoare pozitivă
-                if i == j:  # valoare pe diagonală
-                    matrix[(i, j)] = value
-                else:  # valoare pe diagonală superioară
-                    matrix[(i, j)] = value
-                    matrix[(j, i)] = value  # simetric
-
+        for j in range(i, n):
+            if random.random() < density:
+                value = random.uniform(0.1, 10)
+                matrix[i].append((j, value))
+                if i != j:
+                    matrix[j].append((i, value))
     return matrix
 
-def read_sparse_matrix_from_file(file_path, n):
+def read_sparse_matrix_list_from_file(file_path):
     """
-    Citește matricea rară din fișier
-    file_path: calea fișierului cu tripletele (val, i, j)
-    n: dimensiunea matricei
+    Citește matricea rară din fișier, prima linie conține dimensiunea n,
+    apoi fiecare linie conține: valoare, i, j
     """
-    matrix = {}  # structură de memorie pentru matricea rară
-
+    matrix = {}
     with open(file_path, 'r') as f:
+        n = int(f.readline().strip())  # prima linie conține dimensiunea matricei
         for line in f:
-            val, i, j = map(int, line.split())  # citim tripletele
-            i, j = i - 1, j - 1  # corectăm pentru indexare de la 0
-            if i == j:
-                matrix[(i, j)] = val
-            else:
-                matrix[(i, j)] = val
-                matrix[(j, i)] = val  # matrice simetrică
+            if not line.strip():
+                continue  # sare peste linii goale
+            parts = line.strip().replace(',', '.').split()
+            if len(parts) != 3:
+                continue  # sărim liniile incorecte
+            val, i, j = parts
+            val = float(val.strip().replace(',', '.').strip('.'))
 
-    # Verificarea simetriei
-    for (i, j), value in matrix.items():
-        if matrix.get((j, i)) != value:
-            raise ValueError("Matricea nu este simetrică!")
+            i = int(float(i)) - 1
+            j = int(float(j)) - 1
+            matrix[(i, j)] = val
+            if i != j:
+                matrix[(j, i)] = val  # păstrăm simetria
+    return matrix, n
 
-    return matrix
 
 def power_method(A, n, epsilon=1e-9, kmax=1000000):
     """
     Implementarea metodei puterii pentru a calcula valoarea proprie de modul maxim
-    A: matricea rară simetrică
+    A: matricea rară simetrică (stocată sub forma unui dicționar)
     n: dimensiunea matricei
     epsilon: precizia calculului
     kmax: numărul maxim de iterații
@@ -62,12 +53,10 @@ def power_method(A, n, epsilon=1e-9, kmax=1000000):
     for k in range(kmax):
         w = np.zeros(n)
         # Calculăm produsul matricei sparse cu vectorul
-        for i in range(n):
-            for j in range(i, n):
-                if (i, j) in A:
-                    w[i] += A[(i, j)] * v[j]
-                    if i != j:
-                        w[j] += A[(i, j)] * v[i]
+        for (i, j), value in A.items():
+            w[i] += value * v[j]  # A[i,j] * v[j]
+            if i != j:
+                w[j] += value * v[i]  # A[j,i] * v[i] pentru simetrie
 
         # Calculăm valoarea proprie folosind coeficientul Rayleigh
         lambda_new = np.dot(w, v) / np.dot(v, v)
@@ -82,92 +71,68 @@ def power_method(A, n, epsilon=1e-9, kmax=1000000):
     # Dacă nu s-a ajuns la convergență, returnăm valoarea aproximativă
     return lambda_k, v
 
+
+def compute_norm(A, v, lambda_max, n):
+    """
+    Calcularea normei reziduurilor.
+    A: matricea rară stocată sub formă de dicționar
+    v: vectorul propriu
+    lambda_max: valoarea proprie maximă
+    n: dimensiunea matricei
+    """
+    # Calculăm reziduul
+    residual = np.zeros(n)
+    for i in range(n):
+        # Calculăm produsul liniei i din A cu vectorul v
+        for j, value in A.get(i, []):  # A.get(i, []) pentru a evita KeyError
+            residual[i] += value * v[j]
+
+    # Calculăm norma reziduurilor
+    norma = np.linalg.norm(residual - lambda_max * v)
+    return norma
+
+
 def compute_svd(A):
-    # Descompunerea SVD
     U, S, Vt = np.linalg.svd(A, full_matrices=False)
-
-    # Rangul matricei A
     rank = np.sum(S > 1e-9)
-
-    # Numărul de condiționare al matricei A
     cond_number = max(S) / min(S[S > 1e-9])
-
-    # Pseudoinversa Moore-Penrose
     S_inv = np.diag(1 / S)
     A_inv = Vt.T @ S_inv.T @ U.T
-
     return U, S, Vt, rank, cond_number, A_inv
 
 def solve_least_squares(A, b):
-    # Calculăm soluția sistemului Ax = b folosind pseudoinversa
     U, S, Vt, _, _, A_inv = compute_svd(A)
-    x_I = A_inv @ b
-    return x_I
+    return A_inv @ b
 
 def compute_error(A, b, x_I):
     return np.linalg.norm(b - A @ x_I)
 
-def compute_norm(A, u_max, lambda_max, n):
-    """
-    Calculăm norma ∥A * u_max - λ_max * u_max∥
-    A: matricea rară simetrică
-    u_max: vectorul propriu asociat celei mai mari valori proprii
-    lambda_max: valoarea proprie maximă
-    n: dimensiunea matricei
-    """
-    # Creăm o matrice completă din structura rară pentru produsul A * u_max
-    A_full = np.zeros((n, n))
-    for (i, j), value in A.items():
-        A_full[i, j] = value
-        if i != j:
-            A_full[j, i] = value  # păstrăm simetria
+# === Exemplu de utilizare ===
 
-    # Verificăm dimensiunea matricei complete
-    print("Dimensiunea matricei complete:", A_full.shape)
+# Pentru a citi din fișier:
+file_path = "m_rar_sim"
+A, n = read_sparse_matrix_list_from_file(file_path)
 
-    # Asigurăm că vectorul u_max este un vector coloană
-    u_max = np.reshape(u_max, (-1, 1))  # Transformăm u_max într-un vector coloană, dacă nu este deja
-
-    # Calculăm produsul matricei complete cu vectorul
-    result = A_full @ u_max
-
-    # Calculăm norma diferenței
-    return np.linalg.norm(result - lambda_max * u_max)
-
-# Exemplu de utilizare:
-n = 500  # dimensiunea matricei
-density = 0.05  # densitatea valorilor nenule
-
-# 1. Generăm matricea rară și simetrică
-A = generate_sparse_symmetric_matrix(n, density)
-
-# 2. Calculăm metoda puterii pentru cea mai mare valoare proprie
+# Metoda puterii
 lambda_max, v_max = power_method(A, n)
-
-# Afișăm rezultatele
 print("Cea mai mare valoare proprie:", lambda_max)
 print("Vectorul propriu asociat:", v_max)
 
-# Calculăm norma:
+# Norma
 norma = compute_norm(A, v_max, lambda_max, n)
 print("Norma ∥A * u_max - λ_max * u_max∥:", norma)
 
-# 3. Descompunerea SVD pentru p > n
-A_full = np.random.rand(n, n + 10)  # exemplu de matrice p > n
-b = np.random.rand(n)  # vector b
+# SVD pe o matrice completă aleatoare A_full (ex: p > n)
+A_full = np.random.rand(n, n + 10)
+b = np.random.rand(n)
 
 U, S, Vt, rank, cond_number, A_inv = compute_svd(A_full)
-
-# Afișăm rezultatele SVD
 print("Valorile singulare:", S)
 print("Rangul matricei:", rank)
 print("Numărul de condiționare:", cond_number)
 print("Pseudoinversa A:", A_inv)
 
-# 4. Calculăm soluția sistemului Ax = b folosind pseudoinversa
+# Soluția sistemului și eroare
 x_I = solve_least_squares(A_full, b)
-print("Solutia x_I:", x_I)
-
-# 5. Calculăm norma erorii
-error = compute_error(A_full, b, x_I)
-print("Eroarea:", error)
+print("Soluția x_I:", x_I)
+print("Eroarea:", compute_error(A_full, b, x_I))
